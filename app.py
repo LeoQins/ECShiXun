@@ -211,7 +211,8 @@ def interactive_menu():
     print("2. TCP 客户端")
     print("3. UDP 服务器")
     print("4. UDP 客户端")
-    choice = input("输入选项编号 (1-4): ")
+    print("5. GUI 界面")
+    choice = input("输入选项编号 (1-5): ")
     # 获取主机地址，若未输入则默认为127.0.0.1
     host = input("请输入主机地址 (默认 127.0.0.1): ") or "127.0.0.1"
     # 获取端口号，若未输入则默认为8000
@@ -233,9 +234,79 @@ def interactive_menu():
         udp_server(host, port)
     elif choice == '4':
         udp_client(host, port)
+    elif choice == '5':
+        gui_interface(host, port)
     else:
         print("无效的选项, 程序退出。")
         sys.exit(1)
+
+def gui_interface(inputhost, inputport):
+    """
+    启动一个简单的 Tkinter GUI 界面，实现网络调试助手的可视化操作。
+    """
+    import tkinter as tk
+    from tkinter import ttk
+    import threading
+
+    root = tk.Tk()
+    root.title("网络调试助手 GUI")
+
+    def start_mode(mode):
+        host = host_entry.get() or inputhost
+        try:
+            port = int(port_entry.get() or inputport)
+        except ValueError:
+            log_text.insert(tk.END, "端口号必须为数字!\n")
+            return
+        encoding = encoding_entry.get() or "utf-8"
+        log_text.insert(tk.END, f"启动 {mode}，地址: {host}:{port}，编码: {encoding}\n")
+        # 更新全局编码变量
+        global ENCODING
+        ENCODING = encoding.lower()
+        # 根据选择启动对应功能，放在后台线程中启动避免阻塞GUI
+        if mode == "tcp_server":
+            t = threading.Thread(target=tcp_server, args=(host, port))
+        elif mode == "tcp_client":
+            t = threading.Thread(target=tcp_client, args=(host, port))
+        elif mode == "udp_server":
+            t = threading.Thread(target=udp_server, args=(host, port))
+        elif mode == "udp_client":
+            t = threading.Thread(target=udp_client, args=(host, port))
+        t.daemon = True
+        t.start()
+
+    # 创建输入框
+    frame = ttk.Frame(root, padding=10)
+    frame.grid(row=0, column=0, sticky="NSEW")
+
+    ttk.Label(frame, text="主机地址:").grid(row=0, column=0, sticky="W")
+    host_entry = ttk.Entry(frame)
+    host_entry.insert(0, inputhost)
+    host_entry.grid(row=0, column=1, sticky="EW")
+
+    ttk.Label(frame, text="端口号:").grid(row=1, column=0, sticky="W")
+    port_entry = ttk.Entry(frame)
+    port_entry.insert(0, inputport)
+    port_entry.grid(row=1, column=1, sticky="EW")
+
+    ttk.Label(frame, text="编码:").grid(row=2, column=0, sticky="W")
+    encoding_entry = ttk.Entry(frame)
+    encoding_entry.insert(0, "utf-8")
+    encoding_entry.grid(row=2, column=1, sticky="EW")
+
+    # 创建功能按钮
+    button_frame = ttk.Frame(frame, padding=(0,10))
+    button_frame.grid(row=3, column=0, columnspan=2, sticky="EW")
+    ttk.Button(button_frame, text="TCP 服务器", command=lambda: start_mode("tcp_server")).grid(row=0, column=0, padx=5)
+    ttk.Button(button_frame, text="TCP 客户端", command=lambda: start_mode("tcp_client")).grid(row=0, column=1, padx=5)
+    ttk.Button(button_frame, text="UDP 服务器", command=lambda: start_mode("udp_server")).grid(row=0, column=2, padx=5)
+    ttk.Button(button_frame, text="UDP 客户端", command=lambda: start_mode("udp_client")).grid(row=0, column=3, padx=5)
+
+    # 创建日志输出框
+    log_text = tk.Text(root, height=10, width=60)
+    log_text.grid(row=1, column=0, padx=10, pady=10)
+
+    root.mainloop()
 
 def main():
     """
