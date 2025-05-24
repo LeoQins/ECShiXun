@@ -554,7 +554,7 @@ def main():
     #     "port": 8000,
     #     "encoding": "utf-8"
     # }
-    from config import config
+    from config_app import config
     ENCODING = config.get("encoding", "utf-8").lower()
     mode = config.get("mode", "")
     host = config.get("host", "10.21.88.183")
