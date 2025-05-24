@@ -9,10 +9,11 @@ clients = []
 
 # 默认编码方式，可能的值有 "utf-8" 或 "gbk"；这里设置为 "utf-8"
 ENCODING = "utf-8"
+current_service_stop_event = None  # 全局变量，用于保存当前运行功能的停止事件
 
 
 
-def tcp_client(host, port):
+def tcp_client(host, port, stop_event=None):
     """
     实现 TCP 客户端，连接服务器后既能发送数据也能接收数据。
     
@@ -20,6 +21,9 @@ def tcp_client(host, port):
         host：服务器主机地址
         port：服务器端口
     """
+    if stop_event is None:
+        stop_event = threading.Event()
+
     def receive_from_server(sock):
         """
         客户端专用：接收来自服务器的数据并打印显示。
@@ -29,10 +33,11 @@ def tcp_client(host, port):
         """
         try:
             peer = sock.getpeername()  # 尝试获取服务器的地址和端口
-        except Exception as e:
+        except Exception:
             peer = ("unknown", "unknown")  # 如果获取失败，则设置为未知
-        while True:
+        while not stop_event.is_set():
             try:
+                sock.settimeout(1)  # 每1秒检测一次 stop_event
                 response = sock.recv(1024)  # 从服务器接收最多1024字节的数据
                 if not response:
                     # 当 recv() 返回空字节时，表示服务器已经关闭连接
@@ -42,9 +47,12 @@ def tcp_client(host, port):
                 log_network_event("tcp", peer, sock.getsockname(), response.decode(ENCODING))
                 # 解码接收到的数据并打印
                 print(f"[TCP 客户端] 来自 {peer[0]}:{peer[1]} 收到: {response.decode(ENCODING)}")
+            except socket.timeout:
+                continue
             except Exception as e:
                 print(f"[TCP 客户端] 接收数据错误: {e}")
                 break
+
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # 创建 TCP 套接字
         sock.connect((host, port))  # 连接到指定的服务器
@@ -56,13 +64,23 @@ def tcp_client(host, port):
         recv_thread.start()
 
         # 主线程用于读取用户输入，并将数据发送到服务器
-        while True:
-            data = input("请输入发送内容（输入 exit 退出）：")
+        while not stop_event.is_set():
+            try:
+                # input() 会阻塞，实际场景中在 GUI 可替换为非阻塞输入
+                data = input("请输入发送内容（输入 exit 退出）：")
+            except Exception:
+                break
+            if stop_event.is_set():
+                break
             if data.lower() == 'exit':
-                break  # 输入 exit 即退出客户端
-            sock.sendall(data.encode(ENCODING))  # 将用户输入编码后发送出去
-            # 记录发送数据事件，将发送的内容传入 data 参数
-            log_network_event("tcp", sock.getsockname(), sock.getpeername(), data)
+                break
+            try:
+                sock.sendall(data.encode(ENCODING))  # 将用户输入编码后发送出去
+                # 记录发送数据事件，将发送的内容传入 data 参数
+                log_network_event("tcp", sock.getsockname(), sock.getpeername(), data)
+            except Exception as e:
+                print(f"[TCP 客户端] 发送数据错误: {e}")
+                break
     except Exception as e:
         print(f"TCP 客户端错误: {e}")
     finally:
@@ -70,7 +88,7 @@ def tcp_client(host, port):
         print("[TCP 客户端] 已关闭。")
 
 
-def tcp_server(host, port):
+def tcp_server(host, port, stop_event):
     """
     实现 TCP 服务器，支持多客户端同时连接，并能进行消息回显与广播。
     
@@ -83,8 +101,11 @@ def tcp_server(host, port):
         """
         服务器端专用线程：从操作员处读取输入，并向所有连接中的客户端广播该消息。
         """
-        while True:
-            msg = input("请输入服务器发送内容（输入 exit 可结束输入）：")
+        while not stop_event.is_set():
+            try:
+                msg = input("请输入服务器发送内容（输入 exit 可结束输入）：")
+            except Exception:
+                break
             if msg.lower() == "exit":
                 print("服务器退出输入广播模式。")
                 break
@@ -94,13 +115,12 @@ def tcp_server(host, port):
                     try:
                         server_addr = client.getsockname()
                         client_addr = client.getpeername()
-                        # 记录广播发送事件，将广播消息内容传入 data 参数
                         log_network_event("tcp", server_addr, client_addr, f"{msg}")
                     except Exception:
                         pass
                 except Exception as e:
                     print(f"[TCP 服务器] 向客户端发送消息错误: {e}")
-    
+
     def handle_tcp_client(client_sock, addr):
         """
         为每个连接的TCP客户端创建一个处理线程，负责处理接收和回显消息。
@@ -134,39 +154,41 @@ def tcp_server(host, port):
     try:
         server.bind((host, port))  # 绑定到指定主机地址和端口
         server.listen(5)  # 开始监听，最多允许5个等待连接
+        server.settimeout(1)  # 设置超时以便定期检测 stop_event
         print(f"[TCP 服务端] 服务器启动，正在监听 {host}:{port}")
     except Exception as e:
         print(f"TCP 服务端启动失败: {e}")
-        sys.exit(1)
-    
-    # 启动一个线程，用于接收服务器操作员输入并向客户端广播消息
+        return
+
     input_thread = threading.Thread(target=server_input_broadcast)
-    input_thread.daemon = True  # 设置为守护线程
+    input_thread.daemon = True
     input_thread.start()
-    
+
     try:
-        while True:
-            # 阻塞等待客户端连接
-            client_sock, addr = server.accept()
-            # 为每个连接创建一个线程处理数据收发
+        while not stop_event.is_set():
+            try:
+                client_sock, addr = server.accept()
+            except socket.timeout:
+                continue
             client_thread = threading.Thread(target=handle_tcp_client, args=(client_sock, addr))
-            client_thread.daemon = True  # 设置线程为守护线程
+            client_thread.daemon = True
             client_thread.start()
     except KeyboardInterrupt:
         print("\n[TCP 服务端] 正在关闭服务器...")
     except Exception as e:
         print(f"TCP 服务端错误: {e}")
     finally:
-        server.close()  # 关闭服务器套接字
+        server.close()
+        print("[TCP 服务端] 服务已停止。")
 
 
 
-def udp_client(host, port):
+def udp_client(host, port, stop_event=None):
+    if stop_event is None:
+        stop_event = threading.Event()
+
     def receive_from_udp(sock, stop_event):
-        """
-        在独立线程中持续接收 UDP 消息，检测 stop_event 来退出循环。
-        """
-        sock.settimeout(1)  # 设置1秒超时
+        sock.settimeout(1)
         while not stop_event.is_set():
             try:
                 data, server_addr = sock.recvfrom(1024)
@@ -178,25 +200,28 @@ def udp_client(host, port):
                 print(f"[UDP 客户端] 接收数据错误: {e}")
                 break
 
-    """
-    实现 UDP 客户端：发送消息给服务器，并在独立线程中持续接收服务器消息
-    """
-    stop_event = threading.Event()
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         print(f"[UDP 客户端] 准备向 {host}:{port} 发送数据")
-        
-        # 启动接收线程
         recv_thread = threading.Thread(target=receive_from_udp, args=(sock, stop_event), daemon=True)
         recv_thread.start()
 
-        while True:
-            data = input("请输入发送内容（输入 exit 退出）：")
+        while not stop_event.is_set():
+            try:
+                data = input("请输入发送内容（输入 exit 退出）：")
+            except Exception:
+                break
+            if stop_event.is_set():
+                break
             if data.lower() == 'exit':
                 stop_event.set()
                 break
-            sock.sendto(data.encode(ENCODING), (host, port))
-            log_network_event("udp", sock.getsockname(), (host, port), data)
+            try:
+                sock.sendto(data.encode(ENCODING), (host, port))
+                log_network_event("udp", sock.getsockname(), (host, port), data)
+            except Exception as e:
+                print(f"[UDP 客户端] 发送数据错误: {e}")
+                break
     except Exception as e:
         print(f"UDP 客户端错误: {e}")
     finally:
@@ -204,30 +229,32 @@ def udp_client(host, port):
         sock.close()
         print("[UDP 客户端] 已关闭。")
 
-def udp_server(host, port):
-    """
-    实现 UDP 服务器：接收客户端消息并可以向客户端广播消息。
-    """
+def udp_server(host, port, stop_event=None):
+    if stop_event is None:
+        stop_event = threading.Event()
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    udp_clients = set()  # 用于保存已知的客户端地址
+    udp_clients = set()
     try:
         sock.bind((host, port))
+        sock.settimeout(1)  # 设置超时便于检测 stop_event
         print(f"[UDP 服务端] 服务器启动，正在监听 {host}:{port}")
     except Exception as e:
         print(f"UDP 服务端启动失败: {e}")
         sys.exit(1)
 
-    # 独立线程用于广播消息给所有已知客户端
     def udp_server_broadcast():
-        while True:
-            msg = input("请输入服务器广播消息（输入 exit 退出广播）：")
+        while not stop_event.is_set():
+            try:
+                msg = input("请输入服务器广播消息（输入 exit 退出广播）：")
+            except Exception:
+                break
             if msg.lower() == "exit":
                 print("退出广播模式。")
                 break
             for client_addr in udp_clients:
                 try:
                     sock.sendto(f"[服务器] {msg}".encode(ENCODING), client_addr)
-                    log_network_event("udp", sock.getsockname(), client_addr, f"{msg}")
+                    log_network_event("udp", sock.getsockname(), client_addr, msg)
                 except Exception as e:
                     print(f"[UDP 服务端] 广播给 {client_addr} 错误: {e}")
 
@@ -235,19 +262,21 @@ def udp_server(host, port):
     broadcast_thread.start()
 
     try:
-        while True:
-            data, addr = sock.recvfrom(1024)
-            # 保存最近的客户端地址
+        while not stop_event.is_set():
+            try:
+                data, addr = sock.recvfrom(1024)
+            except socket.timeout:
+                continue
             udp_clients.add(addr)
             log_network_event("udp", addr, sock.getsockname(), data.decode(ENCODING))
             print(f"[UDP 服务端] 来自 {addr} 的消息: {data.decode(ENCODING)}")
-            # 如果需要回显或其他操作，可在此处添加（目前保持不做回显）
     except KeyboardInterrupt:
         print("\n[UDP 服务端] 正在关闭服务器...")
     except Exception as e:
         print(f"UDP 服务端错误: {e}")
     finally:
-        sock.close()  # 关闭 UDP 套接字
+        sock.close()
+        print("[UDP 服务端] 服务已停止。")
 
 def interactive_menu():
     """
@@ -291,9 +320,6 @@ def interactive_menu():
 
 
 def gui_interface(inputhost, inputport):
-    """
-    启动一个简单的 Tkinter GUI 界面，实现网络调试助手的可视化操作。
-    """
     import tkinter as tk
     from tkinter import ttk
     import threading
@@ -302,6 +328,14 @@ def gui_interface(inputhost, inputport):
     root.title("网络调试助手 GUI")
 
     def start_mode(mode):
+        global current_service_stop_event
+        # 如果已有服务在运行，则通知其停止
+        if current_service_stop_event is not None:
+            current_service_stop_event.set()
+        # 为当前服务创建新的停止事件
+        current_service_stop_event = threading.Event()
+        stop_event = current_service_stop_event
+
         host = host_entry.get() or inputhost
         try:
             port = int(port_entry.get() or inputport)
@@ -310,18 +344,17 @@ def gui_interface(inputhost, inputport):
             return
         encoding = encoding_entry.get() or "utf-8"
         log_text.insert(tk.END, f"启动 {mode}，地址: {host}:{port}，编码: {encoding}\n")
-        # 更新全局编码变量
         global ENCODING
         ENCODING = encoding.lower()
-        # 根据选择启动对应功能，放在后台线程中启动避免阻塞GUI
+
         if mode == "tcp_server":
-            t = threading.Thread(target=tcp_server, args=(host, port))
+            t = threading.Thread(target=tcp_server, args=(host, port, stop_event))
         elif mode == "tcp_client":
-            t = threading.Thread(target=tcp_client, args=(host, port))
+            t = threading.Thread(target=tcp_client, args=(host, port, stop_event))
         elif mode == "udp_server":
-            t = threading.Thread(target=udp_server, args=(host, port))
+            t = threading.Thread(target=udp_server, args=(host, port, stop_event))
         elif mode == "udp_client":
-            t = threading.Thread(target=udp_client, args=(host, port))
+            t = threading.Thread(target=udp_client, args=(host, port, stop_event))
         t.daemon = True
         t.start()
 
@@ -400,31 +433,36 @@ def log_network_event(service_type, sender, receiver, data=""):
 
 def main():
     """
-    主函数：根据命令行参数或交互式菜单确定程序的运行模式并启动相应功能。
+    主函数：通过预定义的 config 配置变量确定程序的运行模式和参数，不再手动输入。
     """
     global ENCODING
-    if len(sys.argv) > 1:
-        # 如果传入了命令行参数，则使用 argparse 进行参数解析
-        parser = argparse.ArgumentParser(description="网络调试助手: 实现多种网络功能")
-        parser.add_argument("mode", choices=["tcp_server", "tcp_client", "udp_server", "udp_client"], help="选择运行的模式")
-        parser.add_argument("--host", default="127.0.0.1", help="绑定/连接的主机地址，默认127.0.0.1")
-        parser.add_argument("--port", type=int, default=8000, help="端口号，默认8000")
-        parser.add_argument("--encoding", default="utf-8", help="编码模式，默认 utf-8，可设置为 gbk")
-        args = parser.parse_args()
-        ENCODING = args.encoding.lower()
 
-        # 根据 mode 参数调用对应的功能函数
-        if args.mode == "tcp_server":
-            tcp_server(args.host, args.port)
-        elif args.mode == "tcp_client":
-            tcp_client(args.host, args.port)
-        elif args.mode == "udp_server":
-            udp_server(args.host, args.port)
-        elif args.mode == "udp_client":
-            udp_client(args.host, args.port)
+    # 预定义配置项，修改以下值以调整各项参数
+    config = {
+        "mode": "gui",    # 可选项："tcp_server", "tcp_client", "udp_server", "udp_client", "gui"
+        "host": "10.21.88.183",       # 主机地址
+        "port": 8000,            # 端口号默认8000
+        "encoding": "utf-8"      # 编码模式utf-8或者gbk
+    }
+
+    ENCODING = config.get("encoding", "utf-8").lower()
+    mode = config.get("mode", "")
+    host = config.get("host", "10.21.88.183")
+    port = config.get("port", 8000)
+
+    if mode == "tcp_server":
+        tcp_server(host, port)
+    elif mode == "tcp_client":
+        tcp_client(host, port)
+    elif mode == "udp_server":
+        udp_server(host, port)
+    elif mode == "udp_client":
+        udp_client(host, port)
+    elif mode == "gui":
+        gui_interface(host, port)
     else:
-        # 没有命令行参数时，启动交互式菜单
-        interactive_menu()
+        print("无效的运行模式。")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()  # 程序入口，调用主函数
