@@ -3,9 +3,9 @@ from mysql.connector import errorcode
 
 config = {
     'user': 'root',
-    'password': 'root2004@',
+    'password': 'MySQL2004@',
     'host': '127.0.0.1',
-    'port': 3307,
+    'port': 3306,
     'database': 'mydb',    # 如果还没建库，可以先连接不带 database，然后 cursor.execute("CREATE DATABASE …")
     'charset': 'utf8mb4',
     'use_pure': True,

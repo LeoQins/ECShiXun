@@ -1,6 +1,6 @@
 docker pull mysql:latest
 
-docker run -d --name mysql-container -v D:\mysql_data:/var/lib/mysql -e MYSQL_ROOT_PASSWORD=root2004@ -e MYSQL_DATABASE=mydb -e MYSQL_USER=user1 -e MYSQL_PASSWORD=user12004@ -p 3307:3306 mysql:latest
+docker run -d --name mysql-container -v D:\mysql_data:/var/lib/mysql -e MYSQL_ROOT_PASSWORD=root2004@ -e MYSQL_DATABASE=mydb -e MYSQL_USER=user1 -e MYSQL_PASSWORD=user12004@ -p 3307:3307 mysql:latest
 docker exec -it mysql-container mysql -u root -proot2004@
 
 ---
