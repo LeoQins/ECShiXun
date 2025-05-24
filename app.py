@@ -548,12 +548,13 @@ def log_network_event(service_type, sender, receiver, data=""):
 def main():
     global ENCODING, IS_GUI_MODE, gui_input_queue
     # 配置项设置运行模式及参数
-    config = {
-        "mode": "gui",    # 可选项："tcp_server", "tcp_client", "udp_server", "udp_client", "gui"
-        "host": "10.21.163.147",
-        "port": 8000,
-        "encoding": "utf-8"
-    }
+    # config = {
+    #     "mode": "gui",    # 可选项："tcp_server", "tcp_client", "udp_server", "udp_client", "gui"
+    #     "host": "10.21.163.147",
+    #     "port": 8000,
+    #     "encoding": "utf-8"
+    # }
+    from config import config
     ENCODING = config.get("encoding", "utf-8").lower()
     mode = config.get("mode", "")
     host = config.get("host", "10.21.88.183")
