@@ -1,15 +1,17 @@
+# filepath: c:\Users\LeoQin\Desktop\网络调试助手制作\app.py
+# 导入所需模块，包含网络通信、多线程、命令行参数解析、系统交互、日期处理、数据库操作、队列支持和GUI相关模块
 import socket  # 导入 socket 模块，用于网络通信
 import threading  # 导入 threading 模块，用于多线程处理
 import argparse  # 导入 argparse 模块，用于解析命令行参数
 import sys  # 导入 sys 模块，提供与 Python 解释器交互的函数
-from datetime import datetime
-from sqlapp import insert_for_app  # 导入数据库插入数据
-import queue  # 新增队列模块
-import tkinter as tk  # 用于 update_chat_window
+from datetime import datetime  # 用于处理日期和时间
+from sqlapp import insert_for_app  # 导入数据库插入数据函数
+import queue  # 新增队列模块，用于线程间通信
+import tkinter as tk  # 用于 update_chat_window 更新GUI聊天窗口
 
-# 全局变量：存储所有已连接的客户端套接字，用于后续广播消息
+# 全局变量：存储所有已连接的客户端套接字（用于TCP服务器广播）
 clients = []
-ENCODING = "utf-8"
+ENCODING = "utf-8"  # 默认编码
 current_service_stop_event = None  # 全局变量，用于保存当前运行功能的停止事件
 current_service_thread = None  # 新增：记录当前运行的线程
 
@@ -20,6 +22,8 @@ gui_input_queue = None
 # 定义全局变量，保存 GUI 聊天窗口对象
 g_chat_text = None
 
+# ---------------------------------------------------------------------
+# 功能：更新GUI中聊天窗口显示内容（线程安全方式）
 def update_chat_window(msg):
     """
     在 GUI 聊天窗口中追加消息，保证线程安全更新。
@@ -30,6 +34,8 @@ def update_chat_window(msg):
                                        g_chat_text.see(tk.END)))
 
 
+# ---------------------------------------------------------------------
+# 功能：统一输入函数，根据工作模式选择命令行或GUI输入
 def unified_input(prompt):
     """
     统一输入函数：在 GUI 模式下从 gui_input_queue 中读取输入，
@@ -47,6 +53,9 @@ def unified_input(prompt):
     else:
         return input(prompt)
 
+
+# ---------------------------------------------------------------------
+# 功能：TCP 客户端，实现与服务器进行数据收发
 def tcp_client(host, port, stop_event=None):
     """
     实现 TCP 客户端，连接服务器后既能发送数据也能接收数据。
@@ -58,6 +67,7 @@ def tcp_client(host, port, stop_event=None):
     if stop_event is None:
         stop_event = threading.Event()
 
+    # 内部函数：接收来自服务器的数据
     def receive_from_server(sock):
         """
         客户端专用：接收来自服务器的数据并打印显示。
@@ -102,10 +112,12 @@ def tcp_client(host, port, stop_event=None):
         if IS_GUI_MODE:
             update_chat_window(conn_msg)
 
+        # 创建并启动接收数据线程
         recv_thread = threading.Thread(target=receive_from_server, args=(sock,))
         recv_thread.daemon = True
         recv_thread.start()
 
+        # 主循环：等待用户输入数据发送给服务器
         while not stop_event.is_set():
             try:
                 data = unified_input("请输入发送内容（输入 exit 退出）：")
@@ -142,6 +154,8 @@ def tcp_client(host, port, stop_event=None):
             update_chat_window(end_msg)
 
 
+# ---------------------------------------------------------------------
+# 功能：TCP 服务器，支持多客户端连接、消息转发与广播
 def tcp_server(host, port, stop_event):
     """
     实现 TCP 服务器，支持多客户端同时连接，并能进行消息回显与广播。
@@ -150,7 +164,7 @@ def tcp_server(host, port, stop_event):
         host：绑定的主机地址
         port：监听的端口号
     """
-        
+    # 内部函数：从操作员处获取输入并向所有客户端广播消息
     def server_input_broadcast():
         """
         服务器端专用线程：从操作员处读取输入，并向所有连接中的客户端广播该消息。
@@ -175,6 +189,7 @@ def tcp_server(host, port, stop_event):
                 except Exception as e:
                     print(f"[TCP 服务器] 向客户端发送消息错误: {e}")
 
+    # 内部函数：处理每个TCP客户端连接，接收数据并回显
     def handle_tcp_client(client_sock, addr):
         """
         为每个连接的TCP客户端创建一个处理线程，负责处理接收和回显消息。
@@ -201,6 +216,7 @@ def tcp_server(host, port, stop_event):
                 clients.remove(client_sock)
             client_sock.close()
             print(f"[TCP 服务端] {addr} 连接已关闭。")
+    # 创建TCP服务器套接字
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # 创建 TCP 套接字
     try:
         server.bind((host, port))  # 绑定到指定主机地址和端口
@@ -211,11 +227,13 @@ def tcp_server(host, port, stop_event):
         print(f"TCP 服务端启动失败: {e}")
         return
 
+    # 启动广播输入线程
     input_thread = threading.Thread(target=server_input_broadcast)
     input_thread.daemon = True
     input_thread.start()
 
     try:
+        # 循环等待客户端连接
         while not stop_event.is_set():
             try:
                 client_sock, addr = server.accept()
@@ -233,11 +251,13 @@ def tcp_server(host, port, stop_event):
         print("[TCP 服务端] 服务已停止。")
 
 
-
+# ---------------------------------------------------------------------
+# 功能：UDP 客户端，实现与服务器进行数据收发
 def udp_client(host, port, stop_event=None):
     if stop_event is None:
         stop_event = threading.Event()
 
+    # 内部函数：接收来自UDP服务器的数据
     def receive_from_udp(sock, stop_event):
         sock.settimeout(1)
         while not stop_event.is_set():
@@ -264,6 +284,7 @@ def udp_client(host, port, stop_event=None):
         recv_thread = threading.Thread(target=receive_from_udp, args=(sock, stop_event), daemon=True)
         recv_thread.start()
 
+        # 循环等待用户输入数据，并发送到UDP服务器
         while not stop_event.is_set():
             try:
                 data = unified_input("请输入发送内容（输入 exit 退出）：")
@@ -287,6 +308,9 @@ def udp_client(host, port, stop_event=None):
         sock.close()
         print("[UDP 客户端] 已关闭。")
 
+
+# ---------------------------------------------------------------------
+# 功能：UDP 服务器，支持广播消息并收发数据
 def udp_server(host, port, stop_event=None):
     if stop_event is None:
         stop_event = threading.Event()
@@ -300,6 +324,7 @@ def udp_server(host, port, stop_event=None):
         print(f"UDP 服务端启动失败: {e}")
         sys.exit(1)
     
+    # 内部函数：用于通过输入广播消息给所有UDP客户端
     def udp_server_broadcast():
         while not stop_event.is_set():
             try:
@@ -316,10 +341,12 @@ def udp_server(host, port, stop_event=None):
                 except Exception as e:
                     print(f"[UDP 服务端] 广播给 {client_addr} 错误: {e}")
     
+    # 启动广播线程
     broadcast_thread = threading.Thread(target=udp_server_broadcast, daemon=True)
     broadcast_thread.start()
     
     try:
+        # 循环接收UDP客户端发送的数据
         while not stop_event.is_set():
             try:
                 data, addr = sock.recvfrom(1024)
@@ -340,6 +367,9 @@ def udp_server(host, port, stop_event=None):
         sock.close()
         print("[UDP 服务端] 服务已停止。")
 
+
+# ---------------------------------------------------------------------
+# 功能：交互式菜单，根据输入参数选择不同的运行模式
 def interactive_menu():
     """
     提供一个交互式菜单，使用户可以选择运行模式和输入必要的参数。
@@ -377,7 +407,8 @@ def interactive_menu():
         sys.exit(1)
 
 
-
+# ---------------------------------------------------------------------
+# 功能：图形界面（GUI）入口，构建基于tkinter的网络调试助手界面
 def gui_interface(inputhost, inputport):
     import tkinter as tk
     from tkinter import ttk
@@ -419,6 +450,7 @@ def gui_interface(inputhost, inputport):
     g_chat_text = chat_text  # 全局赋值，便于 update_chat_window 进行调用
     chat_entry = ttk.Entry(chat_frame, width=60)
     chat_entry.grid(row=1, column=0, padx=5, pady=5, sticky="EW")
+    # 内部函数：处理聊天消息发送
     def send_chat():
         content = chat_entry.get().strip()
         if content:
@@ -467,6 +499,10 @@ def gui_interface(inputhost, inputport):
         t.start()
 
     root.mainloop()
+
+
+# ---------------------------------------------------------------------
+# 功能：日志记录，将网络数据收发事件写入日志文件并写入数据库
 def log_network_event(service_type, sender, receiver, data=""):
     """
     记录网络数据收发事件，存储时间戳、服务类型（udp或tcp）、发送方和接收方以及数据内容。
@@ -479,6 +515,7 @@ def log_network_event(service_type, sender, receiver, data=""):
     """
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     log_entry = f"{timestamp} - {service_type} - 发送方: {sender} - 接收方: {receiver} - 数据: {data}\n"
+    # 内部函数：格式化地址输出，转换为 "IP:端口" 格式
     def format_address(s: str) -> str:
         """
         将形如 "('10.21.88.183', 8000)" 的字符串转换为 "10.21.88.183:8000" 格式。
@@ -506,9 +543,11 @@ def log_network_event(service_type, sender, receiver, data=""):
         print(f"日志写入错误: {e}")
 
 
-
+# ---------------------------------------------------------------------
+# 功能：程序入口，根据配置项启动对应模式
 def main():
     global ENCODING, IS_GUI_MODE, gui_input_queue
+    # 配置项设置运行模式及参数
     config = {
         "mode": "gui",    # 可选项："tcp_server", "tcp_client", "udp_server", "udp_client", "gui"
         "host": "10.21.163.147",
