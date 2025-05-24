@@ -11,6 +11,7 @@ import tkinter as tk  # 用于 update_chat_window
 clients = []
 ENCODING = "utf-8"
 current_service_stop_event = None  # 全局变量，用于保存当前运行功能的停止事件
+current_service_thread = None  # 新增：记录当前运行的线程
 
 # 新增：GUI 模式相关标志与输入队列
 IS_GUI_MODE = False  
@@ -381,7 +382,7 @@ def gui_interface(inputhost, inputport):
     import tkinter as tk
     from tkinter import ttk
     import threading
-    global g_chat_text
+    global g_chat_text, current_service_thread
 
     root = tk.Tk()
     root.title("网络调试助手 GUI")
@@ -431,9 +432,12 @@ def gui_interface(inputhost, inputport):
 
     # ---------------- 启动模式函数 ----------------
     def start_mode(mode):
-        global current_service_stop_event, ENCODING
-        if current_service_stop_event is not None:
+        global current_service_stop_event, current_service_thread, ENCODING
+        # 如果有正在运行的功能，先停止并等待退出
+        if current_service_stop_event is not None and current_service_thread is not None:
             current_service_stop_event.set()
+            current_service_thread.join(2)  # 等待最多2秒让线程退出
+        # 新功能开始前，新建停止标志和线程变量
         current_service_stop_event = threading.Event()
         stop_event = current_service_stop_event
 
@@ -449,6 +453,7 @@ def gui_interface(inputhost, inputport):
         chat_text.see(tk.END)
         ENCODING = encoding_val.lower()
 
+        # 根据模式创建对应线程，并记录到全局变量 current_service_thread
         if mode == "tcp_server":
             t = threading.Thread(target=tcp_server, args=(host_val, port_val, stop_event))
         elif mode == "tcp_client":
@@ -458,6 +463,7 @@ def gui_interface(inputhost, inputport):
         elif mode == "udp_client":
             t = threading.Thread(target=udp_client, args=(host_val, port_val, stop_event))
         t.daemon = True
+        current_service_thread = t
         t.start()
 
     root.mainloop()
