@@ -1,0 +1,2 @@
+#下面是该项目所需的 Python 依赖，其中只有 MySQL 连接器需要单独安装（其余模块均为 Python 标准库的一部分）：
+mysql-connector-python
