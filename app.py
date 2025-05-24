@@ -4,14 +4,47 @@ import argparse  # 导入 argparse 模块，用于解析命令行参数
 import sys  # 导入 sys 模块，提供与 Python 解释器交互的函数
 from datetime import datetime
 from sqlapp import insert_for_app  # 导入数据库插入数据
+import queue  # 新增队列模块
+import tkinter as tk  # 用于 update_chat_window
+
 # 全局变量：存储所有已连接的客户端套接字，用于后续广播消息
 clients = []
-
-# 默认编码方式，可能的值有 "utf-8" 或 "gbk"；这里设置为 "utf-8"
 ENCODING = "utf-8"
 current_service_stop_event = None  # 全局变量，用于保存当前运行功能的停止事件
 
+# 新增：GUI 模式相关标志与输入队列
+IS_GUI_MODE = False  
+gui_input_queue = None
 
+# 定义全局变量，保存 GUI 聊天窗口对象
+g_chat_text = None
+
+def update_chat_window(msg):
+    """
+    在 GUI 聊天窗口中追加消息，保证线程安全更新。
+    """
+    global g_chat_text
+    if g_chat_text is not None:
+        g_chat_text.after(0, lambda: (g_chat_text.insert(tk.END, msg + "\n"),
+                                       g_chat_text.see(tk.END)))
+
+
+def unified_input(prompt):
+    """
+    统一输入函数：在 GUI 模式下从 gui_input_queue 中读取输入，
+    若等待过程中检测到停止事件则及时中断，否则使用命令行 input() 完成输入。
+    """
+    if IS_GUI_MODE and gui_input_queue is not None:
+        print(prompt)  # 控制台打印提示信息
+        while True:
+            if current_service_stop_event and current_service_stop_event.is_set():
+                raise Exception("操作已停止")
+            try:
+                return gui_input_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+    else:
+        return input(prompt)
 
 def tcp_client(host, port, stop_event=None):
     """
@@ -32,42 +65,49 @@ def tcp_client(host, port, stop_event=None):
             sock：已连接的服务器端 socket 对象
         """
         try:
-            peer = sock.getpeername()  # 尝试获取服务器的地址和端口
+            peer = sock.getpeername()  # 获取服务器地址和端口
         except Exception:
-            peer = ("unknown", "unknown")  # 如果获取失败，则设置为未知
+            peer = ("unknown", "unknown")
         while not stop_event.is_set():
             try:
-                sock.settimeout(1)  # 每1秒检测一次 stop_event
-                response = sock.recv(1024)  # 从服务器接收最多1024字节的数据
+                sock.settimeout(1)
+                response = sock.recv(1024)
                 if not response:
-                    # 当 recv() 返回空字节时，表示服务器已经关闭连接
-                    print(f"[TCP 客户端] 服务器 {peer[0]}:{peer[1]} 关闭连接。")
+                    msg = f"[TCP 客户端] 服务器 {peer[0]}:{peer[1]} 关闭连接。"
+                    print(msg)
+                    if IS_GUI_MODE:
+                        update_chat_window(msg)
                     break
-                # 记录收到数据事件，将接收的数据传入 data 参数
-                log_network_event("tcp", peer, sock.getsockname(), response.decode(ENCODING))
-                # 解码接收到的数据并打印
-                print(f"[TCP 客户端] 来自 {peer[0]}:{peer[1]} 收到: {response.decode(ENCODING)}")
+                decoded = response.decode(ENCODING)
+                msg = f"[TCP 客户端] 从 {peer[0]}:{peer[1]} 收到: {decoded}"
+                print(msg)
+                if IS_GUI_MODE:
+                    update_chat_window(msg)
+                log_network_event("tcp", peer, sock.getsockname(), decoded)
             except socket.timeout:
                 continue
             except Exception as e:
-                print(f"[TCP 客户端] 接收数据错误: {e}")
+                err_msg = f"[TCP 客户端] 接收数据错误: {e}"
+                print(err_msg)
+                if IS_GUI_MODE:
+                    update_chat_window(err_msg)
                 break
 
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # 创建 TCP 套接字
-        sock.connect((host, port))  # 连接到指定的服务器
-        print(f"[TCP 客户端] 已连接到 {host}:{port}")
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect((host, port))
+        conn_msg = f"[TCP 客户端] 已连接到 {host}:{port}"
+        print(conn_msg)
+        if IS_GUI_MODE:
+            update_chat_window(conn_msg)
 
-        # 启动一个线程专门接收服务器数据，因为接收与发送要并行进行
         recv_thread = threading.Thread(target=receive_from_server, args=(sock,))
-        recv_thread.daemon = True  # 设置为守护线程，在主线程退出时自动结束
+        recv_thread.daemon = True
         recv_thread.start()
 
-        # 主线程用于读取用户输入，并将数据发送到服务器
         while not stop_event.is_set():
             try:
-                # input() 会阻塞，实际场景中在 GUI 可替换为非阻塞输入
-                data = input("请输入发送内容（输入 exit 退出）：")
+                data = unified_input("请输入发送内容（输入 exit 退出）：")
             except Exception:
                 break
             if stop_event.is_set():
@@ -75,17 +115,30 @@ def tcp_client(host, port, stop_event=None):
             if data.lower() == 'exit':
                 break
             try:
-                sock.sendall(data.encode(ENCODING))  # 将用户输入编码后发送出去
-                # 记录发送数据事件，将发送的内容传入 data 参数
-                log_network_event("tcp", sock.getsockname(), sock.getpeername(), data)
+                sock.sendall(data.encode(ENCODING))
+                local_addr = sock.getsockname()
+                send_msg = f"[TCP 客户端] 从 {local_addr[0]}:{local_addr[1]} 发送: {data}"
+                print(send_msg)
+                if IS_GUI_MODE:
+                    update_chat_window(send_msg)
+                log_network_event("tcp", local_addr, sock.getpeername(), data)
             except Exception as e:
-                print(f"[TCP 客户端] 发送数据错误: {e}")
+                err_msg = f"[TCP 客户端] 发送数据错误: {e}"
+                print(err_msg)
+                if IS_GUI_MODE:
+                    update_chat_window(err_msg)
                 break
     except Exception as e:
-        print(f"TCP 客户端错误: {e}")
+        err_msg = f"TCP 客户端错误: {e}"
+        print(err_msg)
+        if IS_GUI_MODE:
+            update_chat_window(err_msg)
     finally:
-        sock.close()  # 确保连接被关闭
-        print("[TCP 客户端] 已关闭。")
+        sock.close()
+        end_msg = "[TCP 客户端] 已关闭。"
+        print(end_msg)
+        if IS_GUI_MODE:
+            update_chat_window(end_msg)
 
 
 def tcp_server(host, port, stop_event):
@@ -103,7 +156,7 @@ def tcp_server(host, port, stop_event):
         """
         while not stop_event.is_set():
             try:
-                msg = input("请输入服务器发送内容（输入 exit 可结束输入）：")
+                msg = unified_input("请输入服务器发送内容（输入 exit 可结束输入）：")
             except Exception:
                 break
             if msg.lower() == "exit":
@@ -133,16 +186,13 @@ def tcp_server(host, port, stop_event):
                 data = client_sock.recv(1024)
                 if not data:
                     break
-                # 记录收到数据事件，将接收到的数据传入 data 参数
-                log_network_event("tcp", addr, client_sock.getsockname(), data.decode(ENCODING))
-                print(f"[TCP 服务端] 来自 {addr} 的消息: {data.decode(ENCODING)}")
-                                    ##############################不需要回显操作#############################################################################
-                                    #
-                                    #    
-                                    #   # client_sock.sendall(f"[回显确认收到]: {data.decode(ENCODING)}".encode(ENCODING))
-                                    #   # # 记录回显发送事件，将回显内容作为 data 参数传入
-                                    #   # log_network_event("tcp", client_sock.getsockname(), addr, f"[回显确认收到]: {data.decode(ENCODING)}")
-                                    #   ########################################################################################################################
+                decoded = data.decode(ENCODING)
+                # 记录收到数据事件
+                log_network_event("tcp", addr, client_sock.getsockname(), decoded)
+                msg = f"[TCP 服务端] 来自 {addr} 的消息: {decoded}"
+                print(msg)
+                if IS_GUI_MODE:
+                    update_chat_window(msg)
         except Exception as e:
             print(f"[TCP 服务端] 错误 ({addr}): {e}")
         finally:
@@ -192,12 +242,19 @@ def udp_client(host, port, stop_event=None):
         while not stop_event.is_set():
             try:
                 data, server_addr = sock.recvfrom(1024)
-                log_network_event("udp", server_addr, sock.getsockname(), data.decode(ENCODING))
-                print(f"[UDP 客户端] 收到 {server_addr} 的消息: {data.decode(ENCODING)}")
+                decoded = data.decode(ENCODING)
+                log_network_event("udp", server_addr, sock.getsockname(), decoded)
+                msg = f"[UDP 客户端] 收到 {server_addr} 的消息: {decoded}"
+                print(msg)
+                if IS_GUI_MODE:
+                    update_chat_window(msg)
             except socket.timeout:
                 continue
             except Exception as e:
-                print(f"[UDP 客户端] 接收数据错误: {e}")
+                err_msg = f"[UDP 客户端] 接收数据错误: {e}"
+                print(err_msg)
+                if IS_GUI_MODE:
+                    update_chat_window(err_msg)
                 break
 
     try:
@@ -208,7 +265,7 @@ def udp_client(host, port, stop_event=None):
 
         while not stop_event.is_set():
             try:
-                data = input("请输入发送内容（输入 exit 退出）：")
+                data = unified_input("请输入发送内容（输入 exit 退出）：")
             except Exception:
                 break
             if stop_event.is_set():
@@ -236,16 +293,16 @@ def udp_server(host, port, stop_event=None):
     udp_clients = set()
     try:
         sock.bind((host, port))
-        sock.settimeout(1)  # 设置超时便于检测 stop_event
+        sock.settimeout(1)
         print(f"[UDP 服务端] 服务器启动，正在监听 {host}:{port}")
     except Exception as e:
         print(f"UDP 服务端启动失败: {e}")
         sys.exit(1)
-
+    
     def udp_server_broadcast():
         while not stop_event.is_set():
             try:
-                msg = input("请输入服务器广播消息（输入 exit 退出广播）：")
+                msg = unified_input("请输入服务器广播消息（输入 exit 退出广播）：")
             except Exception:
                 break
             if msg.lower() == "exit":
@@ -257,10 +314,10 @@ def udp_server(host, port, stop_event=None):
                     log_network_event("udp", sock.getsockname(), client_addr, msg)
                 except Exception as e:
                     print(f"[UDP 服务端] 广播给 {client_addr} 错误: {e}")
-
+    
     broadcast_thread = threading.Thread(target=udp_server_broadcast, daemon=True)
     broadcast_thread.start()
-
+    
     try:
         while not stop_event.is_set():
             try:
@@ -268,8 +325,12 @@ def udp_server(host, port, stop_event=None):
             except socket.timeout:
                 continue
             udp_clients.add(addr)
-            log_network_event("udp", addr, sock.getsockname(), data.decode(ENCODING))
-            print(f"[UDP 服务端] 来自 {addr} 的消息: {data.decode(ENCODING)}")
+            decoded = data.decode(ENCODING)
+            log_network_event("udp", addr, sock.getsockname(), decoded)
+            msg = f"[UDP 服务端] 来自 {addr} 的消息: {decoded}"
+            print(msg)
+            if IS_GUI_MODE:
+                update_chat_window(msg)
     except KeyboardInterrupt:
         print("\n[UDP 服务端] 正在关闭服务器...")
     except Exception as e:
@@ -289,17 +350,14 @@ def interactive_menu():
     print("3. UDP 服务器")
     print("4. UDP 客户端")
     print("5. GUI 界面")
-    choice = input("输入选项编号 (1-5): ")
-    # 获取主机地址，若未输入则默认为127.0.0.1
-    host = input("请输入主机地址 (默认 127.0.0.1): ") or "127.0.0.1"
-    # 获取端口号，若未输入则默认为8000
-    port_input = input("请输入端口号 (默认 8000): ") or "8000"
+    choice = unified_input("输入选项编号 (1-5): ")
+    host = unified_input("请输入主机地址 (默认 127.0.0.1): ") or "127.0.0.1"
+    port_input = unified_input("请输入端口号 (默认 8000): ") or "8000"
     try:
         port = int(port_input)
     except ValueError:
         print("端口号必须为数字!")
         sys.exit(1)
-    # 获取编码方式，默认使用 utf-8
     encoding_input = input("请输入编码模式 (默认 utf-8，选项：utf-8/gbk): ") or "utf-8"
     ENCODING = encoding_input.lower()
     # 根据用户选择启动对应的功能模块
@@ -323,74 +381,86 @@ def gui_interface(inputhost, inputport):
     import tkinter as tk
     from tkinter import ttk
     import threading
+    global g_chat_text
 
     root = tk.Tk()
     root.title("网络调试助手 GUI")
 
-    def start_mode(mode):
-        global current_service_stop_event
-        # 如果已有服务在运行，则通知其停止
-        if current_service_stop_event is not None:
-            current_service_stop_event.set()
-        # 为当前服务创建新的停止事件
-        current_service_stop_event = threading.Event()
-        stop_event = current_service_stop_event
-
-        host = host_entry.get() or inputhost
-        try:
-            port = int(port_entry.get() or inputport)
-        except ValueError:
-            log_text.insert(tk.END, "端口号必须为数字!\n")
-            return
-        encoding = encoding_entry.get() or "utf-8"
-        log_text.insert(tk.END, f"启动 {mode}，地址: {host}:{port}，编码: {encoding}\n")
-        global ENCODING
-        ENCODING = encoding.lower()
-
-        if mode == "tcp_server":
-            t = threading.Thread(target=tcp_server, args=(host, port, stop_event))
-        elif mode == "tcp_client":
-            t = threading.Thread(target=tcp_client, args=(host, port, stop_event))
-        elif mode == "udp_server":
-            t = threading.Thread(target=udp_server, args=(host, port, stop_event))
-        elif mode == "udp_client":
-            t = threading.Thread(target=udp_client, args=(host, port, stop_event))
-        t.daemon = True
-        t.start()
-
-    # 创建输入框
-    frame = ttk.Frame(root, padding=10)
-    frame.grid(row=0, column=0, sticky="NSEW")
-
-    ttk.Label(frame, text="主机地址:").grid(row=0, column=0, sticky="W")
-    host_entry = ttk.Entry(frame)
+    # ---------------- 配置区 ----------------
+    config_frame = ttk.Frame(root, padding=10)
+    config_frame.grid(row=0, column=0, sticky="NSEW")
+    ttk.Label(config_frame, text="主机地址:").grid(row=0, column=0, sticky="W")
+    host_entry = ttk.Entry(config_frame)
     host_entry.insert(0, inputhost)
-    host_entry.grid(row=0, column=1, sticky="EW")
-
-    ttk.Label(frame, text="端口号:").grid(row=1, column=0, sticky="W")
-    port_entry = ttk.Entry(frame)
+    host_entry.grid(row=0, column=1, sticky="EW", padx=5, pady=5)
+    ttk.Label(config_frame, text="端口号:").grid(row=1, column=0, sticky="W")
+    port_entry = ttk.Entry(config_frame)
     port_entry.insert(0, inputport)
-    port_entry.grid(row=1, column=1, sticky="EW")
-
-    ttk.Label(frame, text="编码:").grid(row=2, column=0, sticky="W")
-    encoding_entry = ttk.Entry(frame)
+    port_entry.grid(row=1, column=1, sticky="EW", padx=5, pady=5)
+    ttk.Label(config_frame, text="编码:").grid(row=2, column=0, sticky="W")
+    encoding_entry = ttk.Entry(config_frame)
     encoding_entry.insert(0, "utf-8")
-    encoding_entry.grid(row=2, column=1, sticky="EW")
+    encoding_entry.grid(row=2, column=1, sticky="EW", padx=5, pady=5)
 
-    # 创建功能按钮
-    button_frame = ttk.Frame(frame, padding=(0,10))
+    # ---------------- 功能按钮区 ----------------
+    button_frame = ttk.Frame(config_frame, padding=(0,10))
     button_frame.grid(row=3, column=0, columnspan=2, sticky="EW")
     ttk.Button(button_frame, text="TCP 服务器", command=lambda: start_mode("tcp_server")).grid(row=0, column=0, padx=5)
     ttk.Button(button_frame, text="TCP 客户端", command=lambda: start_mode("tcp_client")).grid(row=0, column=1, padx=5)
     ttk.Button(button_frame, text="UDP 服务器", command=lambda: start_mode("udp_server")).grid(row=0, column=2, padx=5)
     ttk.Button(button_frame, text="UDP 客户端", command=lambda: start_mode("udp_client")).grid(row=0, column=3, padx=5)
 
-    # 创建日志输出框
-    log_text = tk.Text(root, height=10, width=60)
-    log_text.grid(row=1, column=0, padx=10, pady=10)
+    # ---------------- 聊天窗口区 ----------------
+    chat_frame = ttk.Frame(root, padding=10)
+    chat_frame.grid(row=1, column=0, sticky="NSEW")
+    chat_text = tk.Text(chat_frame, height=15, width=80)
+    chat_text.grid(row=0, column=0, columnspan=2, padx=5, pady=5)
+    g_chat_text = chat_text  # 全局赋值，便于 update_chat_window 进行调用
+    chat_entry = ttk.Entry(chat_frame, width=60)
+    chat_entry.grid(row=1, column=0, padx=5, pady=5, sticky="EW")
+    def send_chat():
+        content = chat_entry.get().strip()
+        if content:
+            gui_input_queue.put(content)
+            # 使用配置里的 host:port 显示发送者信息
+            send_msg = f"[{host_entry.get()}:{port_entry.get()}] 发送: {content}"
+            chat_text.insert(tk.END, send_msg + "\n")
+            chat_text.see(tk.END)
+            chat_entry.delete(0, tk.END)
+    ttk.Button(chat_frame, text="发送", command=send_chat).grid(row=1, column=1, padx=5, pady=5)
+
+    # ---------------- 启动模式函数 ----------------
+    def start_mode(mode):
+        global current_service_stop_event, ENCODING
+        if current_service_stop_event is not None:
+            current_service_stop_event.set()
+        current_service_stop_event = threading.Event()
+        stop_event = current_service_stop_event
+
+        host_val = host_entry.get() or inputhost
+        try:
+            port_val = int(port_entry.get() or inputport)
+        except ValueError:
+            chat_text.insert(tk.END, "端口号必须为数字!\n")
+            return
+        encoding_val = encoding_entry.get() or "utf-8"
+        start_msg = f"启动 {mode}，地址: {host_val}:{port_val}，编码: {encoding_val}"
+        chat_text.insert(tk.END, start_msg + "\n")
+        chat_text.see(tk.END)
+        ENCODING = encoding_val.lower()
+
+        if mode == "tcp_server":
+            t = threading.Thread(target=tcp_server, args=(host_val, port_val, stop_event))
+        elif mode == "tcp_client":
+            t = threading.Thread(target=tcp_client, args=(host_val, port_val, stop_event))
+        elif mode == "udp_server":
+            t = threading.Thread(target=udp_server, args=(host_val, port_val, stop_event))
+        elif mode == "udp_client":
+            t = threading.Thread(target=udp_client, args=(host_val, port_val, stop_event))
+        t.daemon = True
+        t.start()
 
     root.mainloop()
-
 def log_network_event(service_type, sender, receiver, data=""):
     """
     记录网络数据收发事件，存储时间戳、服务类型（udp或tcp）、发送方和接收方以及数据内容。
@@ -432,34 +502,34 @@ def log_network_event(service_type, sender, receiver, data=""):
 
 
 def main():
-    """
-    主函数：通过预定义的 config 配置变量确定程序的运行模式和参数，不再手动输入。
-    """
-    global ENCODING
-
-    # 预定义配置项，修改以下值以调整各项参数
+    global ENCODING, IS_GUI_MODE, gui_input_queue
     config = {
         "mode": "gui",    # 可选项："tcp_server", "tcp_client", "udp_server", "udp_client", "gui"
-        "host": "10.21.88.183",       # 主机地址
-        "port": 8000,            # 端口号默认8000
-        "encoding": "utf-8"      # 编码模式utf-8或者gbk
+        "host": "10.21.163.147",
+        "port": 8000,
+        "encoding": "utf-8"
     }
-
     ENCODING = config.get("encoding", "utf-8").lower()
     mode = config.get("mode", "")
     host = config.get("host", "10.21.88.183")
     port = config.get("port", 8000)
-
-    if mode == "tcp_server":
-        tcp_server(host, port)
-    elif mode == "tcp_client":
-        tcp_client(host, port)
-    elif mode == "udp_server":
-        udp_server(host, port)
-    elif mode == "udp_client":
-        udp_client(host, port)
-    elif mode == "gui":
+    
+    if mode == "gui":
+        IS_GUI_MODE = True
+        gui_input_queue = queue.Queue()  # 初始化 GUI 输入队列
         gui_interface(host, port)
+    elif mode == "tcp_server":
+        stop_event = threading.Event()
+        tcp_server(host, port, stop_event)
+    elif mode == "tcp_client":
+        stop_event = threading.Event()
+        tcp_client(host, port, stop_event)
+    elif mode == "udp_server":
+        stop_event = threading.Event()
+        udp_server(host, port, stop_event)
+    elif mode == "udp_client":
+        stop_event = threading.Event()
+        udp_client(host, port, stop_event)
     else:
         print("无效的运行模式。")
         sys.exit(1)
