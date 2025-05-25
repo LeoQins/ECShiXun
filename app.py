@@ -8,7 +8,7 @@ from datetime import datetime  # 用于处理日期和时间
 from sqlapp import insert_for_app  # 导入数据库插入数据函数
 import queue  # 新增队列模块，用于线程间通信
 import tkinter as tk  # 用于 update_chat_window 更新GUI聊天窗口
-
+from init_sql import initsql  # 导入初始化数据库函数
 # 全局变量：存储所有已连接的客户端套接字（用于TCP服务器广播）
 clients = []
 ENCODING = "utf-8"  # 默认编码
@@ -559,7 +559,7 @@ def main():
     mode = config.get("mode", "")
     host = config.get("host", "10.21.88.183")
     port = config.get("port", 8000)
-    
+    initsql()  # 初始化数据库
     if mode == "gui":
         IS_GUI_MODE = True
         gui_input_queue = queue.Queue()  # 初始化 GUI 输入队列
