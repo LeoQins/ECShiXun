@@ -15,7 +15,7 @@ def connect_to_database():
     cnx=mysql.connector.connect(**config)
     return cnx
 
-def insert_for_app(user_input):
+def sql_suery_to_database(user_input):
     cnx = connect_to_database()
     cursor = cnx.cursor()
     if user_input.lower() == "exit":
@@ -47,9 +47,9 @@ def initsql():
         ");\n"
         )
     #     """更新表中的数据"""
-    insert_for_app(args)
+    sql_suery_to_database(args)
 
-def insert_for_app(user_input):
+def sql_suery_to_database(user_input):
     cnx = connect_to_database()
     cursor = cnx.cursor()
     if user_input.lower() == "exit":
