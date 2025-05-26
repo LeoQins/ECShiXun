@@ -159,7 +159,7 @@ def connect_to_database():
     cnx=mysql.connector.connect(**config)
     return cnx
 
-def insert_for_app(user_input):
+def sql_query_to_database(user_input):
     cnx = connect_to_database()
     cursor = cnx.cursor()
     if user_input.lower() == "exit":

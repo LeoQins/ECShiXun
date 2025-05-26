@@ -5,7 +5,7 @@ import threading  # 导入 threading 模块，用于多线程处理
 import argparse  # 导入 argparse 模块，用于解析命令行参数
 import sys  # 导入 sys 模块，提供与 Python 解释器交互的函数
 from datetime import datetime  # 用于处理日期和时间
-from sqlapp import insert_for_app  # 导入数据库插入数据函数
+from sqlapp import sql_query_to_database  # 导入数据库插入数据函数
 import queue  # 新增队列模块，用于线程间通信
 import tkinter as tk  # 用于 update_chat_window 更新GUI聊天窗口
 from init_sql import initsql  # 导入初始化数据库函数
@@ -537,7 +537,7 @@ def log_network_event(service_type, sender, receiver, data=""):
             sender1 = format_address(str(sender))
             receiver1 = format_address(str(receiver))
             args=f"INSERT INTO 通讯记录 (`时间`, `类型`, `发送方`, `接收方`, `数据`)\nVALUES ('{timestamp}','{service_type}','{sender1}', '{receiver1}', '{data}');"
-            insert_for_app(args)  # 将日志写入数据库
+            sql_query_to_database(args)  # 将日志写入数据库
 
     except Exception as e:
         print(f"日志写入错误: {e}")

@@ -1,3 +1,4 @@
+############################################被调用，不直接运行########################
 import mysql.connector
 from mysql.connector import errorcode   
 
