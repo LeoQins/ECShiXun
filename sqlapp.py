@@ -160,6 +160,7 @@ def connect_to_database():
     return cnx
 
 def sql_query_to_database(user_input):
+    results=None
     cnx = connect_to_database()
     cursor = cnx.cursor()
     if user_input.lower() == "exit":
@@ -176,7 +177,7 @@ def sql_query_to_database(user_input):
                 #print("插入数据执行成功")
     except mysql.connector.Error as err:
             print("执行查询时出错:", err)
-
+    return results
 def main():
     try:
         #cnx = mysql.connector.connect(**config)

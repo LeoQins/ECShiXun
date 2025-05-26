@@ -406,7 +406,42 @@ def interactive_menu():
         print("无效的选项, 程序退出。")
         sys.exit(1)
 
+# 新增函数：显示数据统计图表
+def show_statistics_chart():
+    import matplotlib.pyplot as plt
+    # 设置中文字体，使用黑体显示中文
+    plt.rcParams["font.sans-serif"] = ["SimHei"]
+    plt.rcParams["axes.unicode_minus"] = False
 
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+    from tkinter import messagebox
+    from sqlapp import sql_query_to_database
+    # 修改后的查询：时间精确到月日小时分钟秒
+    query = ("SELECT DATE_FORMAT(`时间`, '%m-%d %H:%i:%s') AS 日期, COUNT(*) AS 数量 "
+             "FROM 通讯记录 "
+             "GROUP BY DATE_FORMAT(`时间`, '%m-%d %H:%i:%s') "
+             "ORDER BY 日期;")
+    result = sql_query_to_database(query)
+    if not result:
+        messagebox.showinfo("提示", "未查询到数据!")
+        return
+    dates = [str(row[0]) for row in result]
+    counts = [row[1] for row in result]
+
+    fig, ax = plt.subplots(figsize=(6,4))
+    ax.bar(dates, counts, color='skyblue')
+    ax.set_xlabel("日期")
+    ax.set_ylabel("数量")
+    ax.set_title("通讯记录统计图表")
+    fig.autofmt_xdate()
+
+    import tkinter as tk
+    chart_window = tk.Toplevel()
+    chart_window.title("统计图表")
+    canvas = FigureCanvasTkAgg(fig, master=chart_window)
+    canvas.draw()
+    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+    
 # ---------------------------------------------------------------------
 # 功能：图形界面（GUI）入口，构建基于tkinter的网络调试助手界面
 def gui_interface(inputhost, inputport):
@@ -441,7 +476,9 @@ def gui_interface(inputhost, inputport):
     ttk.Button(button_frame, text="TCP 客户端", command=lambda: start_mode("tcp_client")).grid(row=0, column=1, padx=5)
     ttk.Button(button_frame, text="UDP 服务器", command=lambda: start_mode("udp_server")).grid(row=0, column=2, padx=5)
     ttk.Button(button_frame, text="UDP 客户端", command=lambda: start_mode("udp_client")).grid(row=0, column=3, padx=5)
-
+    # 在配置区中的按钮区下方增加一个按钮
+    stats_btn = ttk.Button(config_frame, text="显示统计图", command=show_statistics_chart)
+    stats_btn.grid(row=4, column=0, columnspan=2, padx=5, pady=5)
     # ---------------- 聊天窗口区 ----------------
     chat_frame = ttk.Frame(root, padding=10)
     chat_frame.grid(row=1, column=0, sticky="NSEW")
