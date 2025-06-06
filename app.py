@@ -450,16 +450,16 @@ def manage_records():
     from tkinter import ttk, messagebox
     from sqlapp import sql_query_to_database
 
-    def fetch_records():
-        # 查询所有记录，假设表中有 id 字段，按照时间倒序排列
-        query = "SELECT id, 时间, 类型, 发送方, 接收方, 数据 FROM 通讯记录 ORDER BY 时间 DESC;"
+    def fetch_records(query=None):
+        if query is None:
+            query = "SELECT id, 时间, 类型, 发送方, 接收方, 数据 FROM 通讯记录 ORDER BY 时间 DESC;"
         records = sql_query_to_database(query)
         return records
 
-    def refresh_tree():
+    def refresh_tree(query=None):
         for item in tree.get_children():
             tree.delete(item)
-        records = fetch_records()
+        records = fetch_records(query)
         for rec in records:
             tree.insert("", "end", iid=rec[0], values=rec)
 
@@ -499,7 +499,6 @@ def manage_records():
         for i, label in enumerate(labels):
             tk.Label(update_win, text=label).grid(row=i, column=0, padx=5, pady=5, sticky="e")
             ent = tk.Entry(update_win, width=30)
-            # rec_values 中依次为：id, 时间, 类型, 发送方, 接收方, 数据
             ent.insert(0, rec_values[i+1])
             ent.grid(row=i, column=1, padx=5, pady=5)
             entries[label] = ent
@@ -532,25 +531,97 @@ def manage_records():
             except Exception as e:
                 messagebox.showerror("错误", f"删除记录失败: {e}")
 
+    def advanced_search():
+        search_win = tk.Toplevel(crud_win)
+        search_win.title("高级查询")
+        labels = ["开始时间", "结束时间", "类型", "发送方", "接收方"]
+        entries = {}
+        for i, label in enumerate(labels):
+            tk.Label(search_win, text=label).grid(row=i, column=0, padx=5, pady=5, sticky="e")
+            ent = tk.Entry(search_win, width=30)
+            ent.grid(row=i, column=1, padx=5, pady=5)
+            entries[label] = ent
+
+        def submit_search():
+            conditions = []
+            stime = entries["开始时间"].get().strip()
+            etime = entries["结束时间"].get().strip()
+            typ = entries["类型"].get().strip()
+            sender = entries["发送方"].get().strip()
+            receiver = entries["接收方"].get().strip()
+            if stime:
+                conditions.append("`时间` >= '{stime}'".format(stime=stime))
+            if etime:
+                conditions.append("`时间` <= '{etime}'".format(etime=etime))
+            if typ:
+                conditions.append("`类型` = '{typ}'".format(typ=typ))
+            if sender:
+                conditions.append("`发送方` = '{sender}'".format(sender=sender))
+            if receiver:
+                conditions.append("`接收方` = '{receiver}'".format(receiver=receiver))
+            query = "SELECT id, 时间, 类型, 发送方, 接收方, 数据 FROM 通讯记录"
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+            query += " ORDER BY 时间 DESC;"
+            try:
+                refresh_tree(query)
+                messagebox.showinfo("提示", "查询成功！")
+                search_win.destroy()
+            except Exception as e:
+                messagebox.showerror("错误", f"查询失败: {e}")
+        tk.Button(search_win, text="查询", command=submit_search).grid(row=len(labels), column=0, columnspan=2, pady=10)
+
+    def global_search():
+        # 新增全局搜索，搜索关键字在所有文本字段中进行模糊匹配
+        search_win = tk.Toplevel(crud_win)
+        search_win.title("全局搜索")
+        tk.Label(search_win, text="搜索关键字:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
+        search_entry = tk.Entry(search_win, width=30)
+        search_entry.grid(row=0, column=1, padx=5, pady=5)
+        def submit_global_search():
+            keyword = search_entry.get().strip()
+            if not keyword:
+                messagebox.showwarning("警告", "请输入搜索关键字")
+                return
+            like_clause = "'%%{}%%'".format(keyword)
+            # 针对所有文本字段使用 OR 进行全局搜索
+            conditions = [
+                "`时间` LIKE " + like_clause,
+                "`类型` LIKE " + like_clause,
+                "`发送方` LIKE " + like_clause,
+                "`接收方` LIKE " + like_clause,
+                "`数据` LIKE " + like_clause
+            ]
+            query = "SELECT id, 时间, 类型, 发送方, 接收方, 数据 FROM 通讯记录 WHERE " + " OR ".join(conditions) + " ORDER BY 时间 DESC;"
+            try:
+                refresh_tree(query)
+                messagebox.showinfo("提示", "查询成功！")
+                search_win.destroy()
+            except Exception as e:
+                messagebox.showerror("错误", f"查询失败: {e}")
+        tk.Button(search_win, text="搜索", command=submit_global_search).grid(row=1, column=0, columnspan=2, pady=10)
+
     crud_win = tk.Toplevel()
     crud_win.title("通讯记录管理")
     crud_win.geometry("800x400")
-    # 创建可滚动区域显示记录
+    # 设置表格：调整了列数以容纳滚动条与全局搜索按钮
     columns = ("id", "时间", "类型", "发送方", "接收方", "数据")
     tree = ttk.Treeview(crud_win, columns=columns, show="headings")
     for col in columns:
         tree.heading(col, text=col)
         tree.column(col, width=100, anchor="center")
-    tree.grid(row=0, column=0, columnspan=4, sticky="nsew")
+    tree.grid(row=0, column=0, columnspan=6, sticky="nsew")
     scrollbar = ttk.Scrollbar(crud_win, orient="vertical", command=tree.yview)
     tree.configure(yscroll=scrollbar.set)
-    scrollbar.grid(row=0, column=4, sticky="ns")
-    # 添加按钮区
-    ttk.Button(crud_win, text="刷新", command=refresh_tree).grid(row=1, column=0, padx=5, pady=5)
+    scrollbar.grid(row=0, column=6, sticky="ns")
+    # 按钮区：新增全局搜索按钮
+    ttk.Button(crud_win, text="刷新", command=lambda: refresh_tree()).grid(row=1, column=0, padx=5, pady=5)
     ttk.Button(crud_win, text="新增", command=add_record).grid(row=1, column=1, padx=5, pady=5)
     ttk.Button(crud_win, text="修改", command=update_record).grid(row=1, column=2, padx=5, pady=5)
     ttk.Button(crud_win, text="删除", command=delete_record).grid(row=1, column=3, padx=5, pady=5)
-    
+    ttk.Button(crud_win, text="高级查询", command=advanced_search).grid(row=1, column=4, padx=5, pady=5)
+    ttk.Button(crud_win, text="全局搜索", command=global_search).grid(row=1, column=5, padx=5, pady=5)
+
     crud_win.rowconfigure(0, weight=1)
     crud_win.columnconfigure(0, weight=1)
     refresh_tree()
@@ -590,15 +661,15 @@ def gui_interface(inputhost, inputport):
     # 显示统计图按钮
     stats_btn = ttk.Button(config_frame, text="显示统计图", command=show_statistics_chart)
     stats_btn.grid(row=4, column=0, columnspan=2, padx=5, pady=5)
-    # 新增：管理通讯记录按钮
-    manage_btn = ttk.Button(config_frame, text="管理通讯记录", command=manage_records)
+    # 修改后的：管理记录按钮，包含增删改查及高级查询
+    manage_btn = ttk.Button(config_frame, text="记录管理（含全局搜索）", command=manage_records)
     manage_btn.grid(row=5, column=0, columnspan=2, padx=5, pady=5)
     # ---------------- 聊天窗口区 ----------------
     chat_frame = ttk.Frame(root, padding=10)
     chat_frame.grid(row=1, column=0, sticky="NSEW")
     chat_text = tk.Text(chat_frame, height=15, width=80)
     chat_text.grid(row=0, column=0, columnspan=2, padx=5, pady=5)
-    g_chat_text = chat_text  # 全局赋值，便于 update_chat_window 进行调用
+    g_chat_text = chat_text  # 全局赋值，便于 update_chat_window 调用
     chat_entry = ttk.Entry(chat_frame, width=60)
     chat_entry.grid(row=1, column=0, padx=5, pady=5, sticky="EW")
     # 内部函数：处理聊天消息发送
@@ -606,7 +677,7 @@ def gui_interface(inputhost, inputport):
         content = chat_entry.get().strip()
         if content:
             gui_input_queue.put(content)
-            # 使用配置里的 host:port 显示发送者信息
+             # 使用配置里的 host:port 显示发送者信息
             send_msg = f"[{host_entry.get()}:{port_entry.get()}] 发送: {content}"
             chat_text.insert(tk.END, send_msg + "\n")
             chat_text.see(tk.END)
