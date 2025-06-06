@@ -634,10 +634,20 @@ def gui_interface(inputhost, inputport):
 
     root = tk.Tk()
     root.title("网络调试助手 GUI")
+    root.geometry("700x500")
+    root.resizable(False, False)
+
+    # 设置激进风格的 ttk 样式，不使用 calm 主题
+    style = ttk.Style()
+    style.theme_use('alt')  # 使用 'alt' 主题替代 calm
+    style.configure("TFrame", background="#6EC9E8")  # 深色背景
+    style.configure("TLabel", background="#92CAD0", foreground="#4D1B1B", font=("微软雅黑", 12, "bold"))
+    style.configure("TButton", background="#FF0000", foreground="#5F1D1D", font=("微软雅黑", 12, "bold"), padding=8)
+    style.configure("TEntry", font=("微软雅黑", 12), padding=5)
 
     # ---------------- 配置区 ----------------
     config_frame = ttk.Frame(root, padding=10)
-    config_frame.grid(row=0, column=0, sticky="NSEW")
+    config_frame.grid(row=0, column=0, sticky="EW")
     ttk.Label(config_frame, text="主机地址:").grid(row=0, column=0, sticky="W")
     host_entry = ttk.Entry(config_frame)
     host_entry.insert(0, inputhost)
@@ -650,6 +660,7 @@ def gui_interface(inputhost, inputport):
     encoding_entry = ttk.Entry(config_frame)
     encoding_entry.insert(0, "utf-8")
     encoding_entry.grid(row=2, column=1, sticky="EW", padx=5, pady=5)
+    config_frame.columnconfigure(1, weight=1)
 
     # ---------------- 功能按钮区 ----------------
     button_frame = ttk.Frame(config_frame, padding=(0,10))
@@ -658,40 +669,34 @@ def gui_interface(inputhost, inputport):
     ttk.Button(button_frame, text="TCP 客户端", command=lambda: start_mode("tcp_client")).grid(row=0, column=1, padx=5)
     ttk.Button(button_frame, text="UDP 服务器", command=lambda: start_mode("udp_server")).grid(row=0, column=2, padx=5)
     ttk.Button(button_frame, text="UDP 客户端", command=lambda: start_mode("udp_client")).grid(row=0, column=3, padx=5)
-    # 显示统计图按钮
-    stats_btn = ttk.Button(config_frame, text="显示统计图", command=show_statistics_chart)
-    stats_btn.grid(row=4, column=0, columnspan=2, padx=5, pady=5)
-    # 修改后的：管理记录按钮，包含增删改查及高级查询
-    manage_btn = ttk.Button(config_frame, text="记录管理（含全局搜索）", command=manage_records)
-    manage_btn.grid(row=5, column=0, columnspan=2, padx=5, pady=5)
+    ttk.Button(config_frame, text="显示统计图", command=show_statistics_chart).grid(row=4, column=0, columnspan=2, padx=5, pady=5)
+    ttk.Button(config_frame, text="记录管理", command=manage_records).grid(row=5, column=0, columnspan=2, padx=5, pady=5)
+
     # ---------------- 聊天窗口区 ----------------
     chat_frame = ttk.Frame(root, padding=10)
     chat_frame.grid(row=1, column=0, sticky="NSEW")
-    chat_text = tk.Text(chat_frame, height=15, width=80)
+    chat_text = tk.Text(chat_frame, height=15, width=80, font=("微软雅黑", 10), bg="#95C5D2")
     chat_text.grid(row=0, column=0, columnspan=2, padx=5, pady=5)
     g_chat_text = chat_text  # 全局赋值，便于 update_chat_window 调用
     chat_entry = ttk.Entry(chat_frame, width=60)
     chat_entry.grid(row=1, column=0, padx=5, pady=5, sticky="EW")
-    # 内部函数：处理聊天消息发送
     def send_chat():
         content = chat_entry.get().strip()
         if content:
             gui_input_queue.put(content)
-             # 使用配置里的 host:port 显示发送者信息
             send_msg = f"[{host_entry.get()}:{port_entry.get()}] 发送: {content}"
             chat_text.insert(tk.END, send_msg + "\n")
             chat_text.see(tk.END)
             chat_entry.delete(0, tk.END)
     ttk.Button(chat_frame, text="发送", command=send_chat).grid(row=1, column=1, padx=5, pady=5)
+    chat_frame.columnconfigure(0, weight=1)
 
     # ---------------- 启动模式函数 ----------------
     def start_mode(mode):
         global current_service_stop_event, current_service_thread, ENCODING
-        # 如果有正在运行的功能，先停止并等待退出
         if current_service_stop_event is not None and current_service_thread is not None:
             current_service_stop_event.set()
-            current_service_thread.join(2)  # 等待最多2秒让线程退出
-        # 新功能开始前，新建停止标志和线程变量
+            current_service_thread.join(2)
         current_service_stop_event = threading.Event()
         stop_event = current_service_stop_event
 
@@ -702,12 +707,11 @@ def gui_interface(inputhost, inputport):
             chat_text.insert(tk.END, "端口号必须为数字!\n")
             return
         encoding_val = encoding_entry.get() or "utf-8"
+        ENCODING = encoding_val.lower()
         start_msg = f"启动 {mode}，地址: {host_val}:{port_val}，编码: {encoding_val}"
         chat_text.insert(tk.END, start_msg + "\n")
         chat_text.see(tk.END)
-        ENCODING = encoding_val.lower()
 
-        # 根据模式创建对应线程，并记录到全局变量 current_service_thread
         if mode == "tcp_server":
             t = threading.Thread(target=tcp_server, args=(host_val, port_val, stop_event))
         elif mode == "tcp_client":
