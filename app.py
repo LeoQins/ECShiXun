@@ -441,8 +441,119 @@ def show_statistics_chart():
     canvas = FigureCanvasTkAgg(fig, master=chart_window)
     canvas.draw()
     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-    
+
+ #   
 # ---------------------------------------------------------------------
+#新增功能增删改查
+def manage_records():
+    import tkinter as tk
+    from tkinter import ttk, messagebox
+    from sqlapp import sql_query_to_database
+
+    def fetch_records():
+        # 查询所有记录，假设表中有 id 字段，按照时间倒序排列
+        query = "SELECT id, 时间, 类型, 发送方, 接收方, 数据 FROM 通讯记录 ORDER BY 时间 DESC;"
+        records = sql_query_to_database(query)
+        return records
+
+    def refresh_tree():
+        for item in tree.get_children():
+            tree.delete(item)
+        records = fetch_records()
+        for rec in records:
+            tree.insert("", "end", iid=rec[0], values=rec)
+
+    def add_record():
+        add_win = tk.Toplevel(crud_win)
+        add_win.title("新增记录")
+        labels = ["时间", "类型", "发送方", "接收方", "数据"]
+        entries = {}
+        for i, label in enumerate(labels):
+            tk.Label(add_win, text=label).grid(row=i, column=0, padx=5, pady=5, sticky="e")
+            ent = tk.Entry(add_win, width=30)
+            ent.grid(row=i, column=1, padx=5, pady=5)
+            entries[label] = ent
+        def submit_add():
+            values = {label: entries[label].get() for label in labels}
+            query = ("INSERT INTO 通讯记录 (`时间`, `类型`, `发送方`, `接收方`, `数据`) "
+                     "VALUES ('{时间}', '{类型}', '{发送方}', '{接收方}', '{数据}');").format(**values)
+            try:
+                sql_query_to_database(query)
+                messagebox.showinfo("提示", "记录新增成功！")
+                add_win.destroy()
+                refresh_tree()
+            except Exception as e:
+                messagebox.showerror("错误", f"新增记录失败: {e}")
+        tk.Button(add_win, text="提交", command=submit_add).grid(row=len(labels), column=0, columnspan=2, pady=10)
+
+    def update_record():
+        selected = tree.focus()
+        if not selected:
+            messagebox.showwarning("警告", "请选择要修改的记录")
+            return
+        rec_values = tree.item(selected, "values")
+        update_win = tk.Toplevel(crud_win)
+        update_win.title("修改记录")
+        labels = ["时间", "类型", "发送方", "接收方", "数据"]
+        entries = {}
+        for i, label in enumerate(labels):
+            tk.Label(update_win, text=label).grid(row=i, column=0, padx=5, pady=5, sticky="e")
+            ent = tk.Entry(update_win, width=30)
+            # rec_values 中依次为：id, 时间, 类型, 发送方, 接收方, 数据
+            ent.insert(0, rec_values[i+1])
+            ent.grid(row=i, column=1, padx=5, pady=5)
+            entries[label] = ent
+        def submit_update():
+            values = {label: entries[label].get() for label in labels}
+            record_id = selected
+            query = ("UPDATE 通讯记录 SET `时间`='{时间}', `类型`='{类型}', `发送方`='{发送方}', `接收方`='{接收方}', `数据`='{数据}' "
+                     "WHERE id={id};").format(id=record_id, **values)
+            try:
+                sql_query_to_database(query)
+                messagebox.showinfo("提示", "记录修改成功！")
+                update_win.destroy()
+                refresh_tree()
+            except Exception as e:
+                messagebox.showerror("错误", f"修改记录失败: {e}")
+        tk.Button(update_win, text="提交", command=submit_update).grid(row=len(labels), column=0, columnspan=2, pady=10)
+
+    def delete_record():
+        selected = tree.focus()
+        if not selected:
+            messagebox.showwarning("警告", "请选择要删除的记录")
+            return
+        confirm = messagebox.askyesno("确认", "确定要删除选中的记录吗？")
+        if confirm:
+            query = "DELETE FROM 通讯记录 WHERE id={id};".format(id=selected)
+            try:
+                sql_query_to_database(query)
+                messagebox.showinfo("提示", "记录删除成功！")
+                refresh_tree()
+            except Exception as e:
+                messagebox.showerror("错误", f"删除记录失败: {e}")
+
+    crud_win = tk.Toplevel()
+    crud_win.title("通讯记录管理")
+    crud_win.geometry("800x400")
+    # 创建可滚动区域显示记录
+    columns = ("id", "时间", "类型", "发送方", "接收方", "数据")
+    tree = ttk.Treeview(crud_win, columns=columns, show="headings")
+    for col in columns:
+        tree.heading(col, text=col)
+        tree.column(col, width=100, anchor="center")
+    tree.grid(row=0, column=0, columnspan=4, sticky="nsew")
+    scrollbar = ttk.Scrollbar(crud_win, orient="vertical", command=tree.yview)
+    tree.configure(yscroll=scrollbar.set)
+    scrollbar.grid(row=0, column=4, sticky="ns")
+    # 添加按钮区
+    ttk.Button(crud_win, text="刷新", command=refresh_tree).grid(row=1, column=0, padx=5, pady=5)
+    ttk.Button(crud_win, text="新增", command=add_record).grid(row=1, column=1, padx=5, pady=5)
+    ttk.Button(crud_win, text="修改", command=update_record).grid(row=1, column=2, padx=5, pady=5)
+    ttk.Button(crud_win, text="删除", command=delete_record).grid(row=1, column=3, padx=5, pady=5)
+    
+    crud_win.rowconfigure(0, weight=1)
+    crud_win.columnconfigure(0, weight=1)
+    refresh_tree()
 # 功能：图形界面（GUI）入口，构建基于tkinter的网络调试助手界面
 def gui_interface(inputhost, inputport):
     import tkinter as tk
@@ -476,9 +587,12 @@ def gui_interface(inputhost, inputport):
     ttk.Button(button_frame, text="TCP 客户端", command=lambda: start_mode("tcp_client")).grid(row=0, column=1, padx=5)
     ttk.Button(button_frame, text="UDP 服务器", command=lambda: start_mode("udp_server")).grid(row=0, column=2, padx=5)
     ttk.Button(button_frame, text="UDP 客户端", command=lambda: start_mode("udp_client")).grid(row=0, column=3, padx=5)
-    # 在配置区中的按钮区下方增加一个按钮
+    # 显示统计图按钮
     stats_btn = ttk.Button(config_frame, text="显示统计图", command=show_statistics_chart)
     stats_btn.grid(row=4, column=0, columnspan=2, padx=5, pady=5)
+    # 新增：管理通讯记录按钮
+    manage_btn = ttk.Button(config_frame, text="管理通讯记录", command=manage_records)
+    manage_btn.grid(row=5, column=0, columnspan=2, padx=5, pady=5)
     # ---------------- 聊天窗口区 ----------------
     chat_frame = ttk.Frame(root, padding=10)
     chat_frame.grid(row=1, column=0, sticky="NSEW")
