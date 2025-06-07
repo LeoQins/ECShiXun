@@ -637,13 +637,9 @@ def gui_interface(inputhost, inputport):
     root.geometry("700x500")
     root.resizable(False, False)
 
-    # 设置激进风格的 ttk 样式，不使用 calm 主题
-    style = ttk.Style()
-    style.theme_use('alt')  # 使用 'alt' 主题替代 calm
-    style.configure("TFrame", background="#6EC9E8")  # 深色背景
-    style.configure("TLabel", background="#92CAD0", foreground="#4D1B1B", font=("微软雅黑", 12, "bold"))
-    style.configure("TButton", background="#FF0000", foreground="#5F1D1D", font=("微软雅黑", 12, "bold"), padding=8)
-    style.configure("TEntry", font=("微软雅黑", 12), padding=5)
+    # 添加 grid 配置确保聊天区域正常显示
+    root.columnconfigure(0, weight=1)
+    root.rowconfigure(1, weight=1)
 
     # ---------------- 配置区 ----------------
     config_frame = ttk.Frame(root, padding=10)
@@ -675,8 +671,12 @@ def gui_interface(inputhost, inputport):
     # ---------------- 聊天窗口区 ----------------
     chat_frame = ttk.Frame(root, padding=10)
     chat_frame.grid(row=1, column=0, sticky="NSEW")
+    # 配置 chat_frame 内的行列以保证控件正常分布
+    chat_frame.columnconfigure(0, weight=1)
+    chat_frame.rowconfigure(0, weight=1)
+
     chat_text = tk.Text(chat_frame, height=15, width=80, font=("微软雅黑", 10), bg="#95C5D2")
-    chat_text.grid(row=0, column=0, columnspan=2, padx=5, pady=5)
+    chat_text.grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky="NSEW")
     g_chat_text = chat_text  # 全局赋值，便于 update_chat_window 调用
     chat_entry = ttk.Entry(chat_frame, width=60)
     chat_entry.grid(row=1, column=0, padx=5, pady=5, sticky="EW")
@@ -689,7 +689,6 @@ def gui_interface(inputhost, inputport):
             chat_text.see(tk.END)
             chat_entry.delete(0, tk.END)
     ttk.Button(chat_frame, text="发送", command=send_chat).grid(row=1, column=1, padx=5, pady=5)
-    chat_frame.columnconfigure(0, weight=1)
 
     # ---------------- 启动模式函数 ----------------
     def start_mode(mode):
