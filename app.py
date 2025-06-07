@@ -89,7 +89,7 @@ def tcp_client(host, port, stop_event=None):
                     if IS_GUI_MODE:
                         update_chat_window(msg)
                     break
-                decoded = response.decode(ENCODING)
+                decoded = response.decode(ENCODING,errors='ignore')
                 msg = f"[TCP 客户端] 从 {peer[0]}:{peer[1]} 收到: {decoded}"
                 print(msg)
                 if IS_GUI_MODE:
@@ -202,7 +202,7 @@ def tcp_server(host, port, stop_event):
                 data = client_sock.recv(1024)
                 if not data:
                     break
-                decoded = data.decode(ENCODING)
+                decoded = data.decode(ENCODING,errors='ignore')
                 # 记录收到数据事件
                 log_network_event("tcp", addr, client_sock.getsockname(), decoded)
                 msg = f"[TCP 服务端] 来自 {addr} 的消息: {decoded}"
@@ -263,7 +263,7 @@ def udp_client(host, port, stop_event=None):
         while not stop_event.is_set():
             try:
                 data, server_addr = sock.recvfrom(1024)
-                decoded = data.decode(ENCODING)
+                decoded = data.decode(ENCODING,errors='ignore')
                 log_network_event("udp", server_addr, sock.getsockname(), decoded)
                 msg = f"[UDP 客户端] 收到 {server_addr} 的消息: {decoded}"
                 print(msg)
@@ -353,7 +353,7 @@ def udp_server(host, port, stop_event=None):
             except socket.timeout:
                 continue
             udp_clients.add(addr)
-            decoded = data.decode(ENCODING)
+            decoded = data.decode(ENCODING,errors='ignore')
             log_network_event("udp", addr, sock.getsockname(), decoded)
             msg = f"[UDP 服务端] 来自 {addr} 的消息: {decoded}"
             print(msg)
